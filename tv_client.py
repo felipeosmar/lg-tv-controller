@@ -353,6 +353,38 @@ class LGTVClient:
             "params": {"target": url},
         })
 
+    async def launch_netflix(self, title_id: str, auto_play: bool = True) -> dict:
+        """Abre um título na Netflix e opcionalmente dá play automaticamente.
+
+        Args:
+            title_id: ID do título (ex: '81321370' para Teletubbies 2022)
+            auto_play: Se True, envia ENTER após carregar para iniciar reprodução
+        """
+        result = await self.request(SSAP["launch_app"], {
+            "id": "netflix",
+            "params": {"contentTarget": f"https://www.netflix.com/title/{title_id}"},
+        })
+        if auto_play:
+            # Aguardar Netflix carregar o título e a página de detalhes renderizar.
+            # Detectamos quando a Netflix está em foreground e estável,
+            # depois enviamos ENTER para dar play no botão "Continuar".
+            for attempt in range(3):
+                await asyncio.sleep(5)
+                try:
+                    fg = await self.get_foreground_app()
+                    if fg.get("appId") == "netflix":
+                        # Netflix em foreground — esperar página renderizar
+                        await asyncio.sleep(3)
+                        await self.send_button("ENTER")
+                        # Verificar se entrou no player (aguardar e checar)
+                        await asyncio.sleep(3)
+                        fg2 = await self.get_foreground_app()
+                        if fg2.get("appId") == "netflix":
+                            break  # Ainda na Netflix = sucesso (player ou detalhes)
+                except Exception:
+                    pass
+        return result
+
     async def close_app(self, app_id: str) -> dict:
         return await self.request(SSAP["close_app"], {"id": app_id})
 
