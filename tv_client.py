@@ -346,6 +346,13 @@ class LGTVClient:
             payload["params"] = params
         return await self.request(SSAP["launch_app"], payload)
 
+    async def open_url(self, url: str) -> dict:
+        """Abre uma URL no browser da TV."""
+        return await self.request(SSAP["launch_app"], {
+            "id": "com.webos.app.browser",
+            "params": {"target": url},
+        })
+
     async def close_app(self, app_id: str) -> dict:
         return await self.request(SSAP["close_app"], {"id": app_id})
 

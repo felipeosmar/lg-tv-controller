@@ -251,7 +251,8 @@ async def api_apps(request):
     # Resolver alias
     app_id = APP_IDS.get(app_id, app_id)
     if action == "launch":
-        result = await tv.launch_app(app_id)
+        params = body.get("params")
+        result = await tv.launch_app(app_id, params=params)
     elif action == "close":
         result = await tv.close_app(app_id)
     else:
