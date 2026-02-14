@@ -4,3 +4,4 @@ __pycache__/
 .tv_client_key
 *.log
 .env
+presets.json

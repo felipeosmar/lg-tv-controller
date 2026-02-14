@@ -13,6 +13,11 @@ import aiohttp_jinja2
 import jinja2
 from aiohttp import web
 
+import ssl as _ssl
+
+import aiohttp as _aiohttp
+
+from presets import load_presets, save_presets, get_preset, add_preset, remove_preset
 from tv_client import LGTVClient, APP_IDS, SSAP
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -214,6 +219,102 @@ async def api_remote(request):
         return web.json_response({"ok": False, "message": "Ação inválida"}, status=400)
 
 
+async def api_screenshot(request):
+    """GET: captura screenshot da TV e retorna a imagem como proxy."""
+    try:
+        image_url = await tv.screenshot()
+        if not image_url:
+            return web.json_response({"ok": False, "message": "Falha ao capturar screenshot"}, status=500)
+
+        # Proxy the image (TV uses self-signed cert)
+        ssl_ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_CLIENT)
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = _ssl.CERT_NONE
+        connector = _aiohttp.TCPConnector(ssl=ssl_ctx)
+        async with _aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(image_url, timeout=_aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.read()
+                    return web.Response(
+                        body=data,
+                        content_type=resp.content_type or "image/jpeg",
+                        headers={"Cache-Control": "no-cache"},
+                    )
+                else:
+                    return web.json_response(
+                        {"ok": False, "message": f"TV retornou status {resp.status}"},
+                        status=502,
+                    )
+    except ConnectionError as e:
+        return web.json_response({"ok": False, "message": str(e)}, status=503)
+    except Exception as e:
+        logger.exception("Erro no screenshot")
+        return web.json_response({"ok": False, "message": str(e)}, status=500)
+
+
+async def api_presets(request):
+    """GET: lista presets. POST: executa, cria ou deleta preset."""
+    if request.method == "GET":
+        return web.json_response(load_presets())
+
+    body = await request.json()
+    action = body.get("action", "execute")
+
+    if action == "execute":
+        preset_id = body.get("id", "")
+        preset = get_preset(preset_id)
+        if not preset:
+            return web.json_response({"ok": False, "message": f"Preset '{preset_id}' não encontrado"}, status=404)
+
+        results = []
+        for act in preset.get("actions", []):
+            try:
+                act_type = act.get("type", "")
+                if act_type == "app":
+                    await tv.launch_app(act["app_id"])
+                    results.append(f"App {act['app_id']} lançado")
+                elif act_type == "volume":
+                    await tv.set_volume(int(act["level"]))
+                    results.append(f"Volume → {act['level']}")
+                elif act_type == "mute":
+                    await tv.set_mute(act.get("mute", True))
+                    results.append(f"Mute → {act.get('mute')}")
+                elif act_type == "input":
+                    await tv.set_input(act["input_id"])
+                    results.append(f"Input → {act['input_id']}")
+                elif act_type == "power":
+                    if act.get("action") == "off":
+                        await tv.power_off()
+                        results.append("TV desligada")
+                    elif act.get("action") == "screen_off":
+                        await tv.screen_off()
+                        results.append("Tela desligada")
+                elif act_type == "channel":
+                    await tv.set_channel(act["channel_id"])
+                    results.append(f"Canal → {act['channel_id']}")
+                elif act_type == "button":
+                    await tv.send_button(act["name"])
+                    results.append(f"Botão {act['name']}")
+                await asyncio.sleep(0.5)  # Pausa entre ações
+            except Exception as e:
+                results.append(f"Erro: {e}")
+        return web.json_response({"ok": True, "preset": preset["name"], "results": results})
+
+    elif action == "save":
+        preset = body.get("preset", {})
+        if not preset.get("id") or not preset.get("name"):
+            return web.json_response({"ok": False, "message": "ID e nome são obrigatórios"}, status=400)
+        presets = add_preset(preset)
+        return web.json_response({"ok": True, "presets": presets})
+
+    elif action == "delete":
+        preset_id = body.get("id", "")
+        presets = remove_preset(preset_id)
+        return web.json_response({"ok": True, "presets": presets})
+
+    return web.json_response({"ok": False, "message": "Ação inválida"}, status=400)
+
+
 async def api_info(request):
     """GET: informações do sistema e serviços."""
     data = {}
@@ -290,6 +391,9 @@ def create_app():
     app.router.add_post("/api/media", api_media)
     app.router.add_post("/api/toast", api_toast)
     app.router.add_post("/api/remote", api_remote)
+    app.router.add_get("/api/screenshot", api_screenshot)
+    app.router.add_get("/api/presets", api_presets)
+    app.router.add_post("/api/presets", api_presets)
     app.router.add_get("/api/info", api_info)
 
     return app

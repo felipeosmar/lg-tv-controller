@@ -109,6 +109,8 @@ SSAP = {
     # Tela
     "screen_off": "ssap://com.webos.service.tvpower/power/turnOffScreen",
     "screen_on": "ssap://com.webos.service.tvpower/power/turnOnScreen",
+    # Screenshot
+    "screenshot": "ssap://tv/executeOneShot",
 }
 
 # IDs de aplicativos conhecidos
@@ -406,6 +408,11 @@ class LGTVClient:
 
     async def screen_on(self) -> dict:
         return await self.request(SSAP["screen_on"])
+
+    async def screenshot(self) -> str | None:
+        """Captura screenshot da tela da TV. Retorna a URL da imagem."""
+        result = await self.request(SSAP["screenshot"])
+        return result.get("imageUri")
 
     async def connect_pointer(self) -> bool:
         """Conecta ao socket de pointer/input (emulação do Magic Remote)."""
