@@ -178,6 +178,42 @@ async def api_toast(request):
     return web.json_response({"ok": True, "result": result})
 
 
+async def api_remote(request):
+    """POST: comandos do controle remoto (botões, cursor, texto)."""
+    body = await request.json()
+    action = body.get("action", "")
+
+    if action == "button":
+        name = body.get("name", "").upper()
+        await tv.send_button(name)
+        return web.json_response({"ok": True, "button": name})
+    elif action == "move":
+        dx = int(body.get("dx", 0))
+        dy = int(body.get("dy", 0))
+        await tv.pointer_move(dx, dy)
+        return web.json_response({"ok": True})
+    elif action == "click":
+        await tv.pointer_click()
+        return web.json_response({"ok": True})
+    elif action == "scroll":
+        dy = int(body.get("dy", 0))
+        await tv.pointer_scroll(dy=dy)
+        return web.json_response({"ok": True})
+    elif action == "text":
+        text = body.get("text", "")
+        result = await tv.send_text(text)
+        return web.json_response({"ok": True, "result": result})
+    elif action == "enter":
+        result = await tv.send_enter()
+        return web.json_response({"ok": True, "result": result})
+    elif action == "delete":
+        count = int(body.get("count", 1))
+        result = await tv.send_delete(count)
+        return web.json_response({"ok": True, "result": result})
+    else:
+        return web.json_response({"ok": False, "message": "Ação inválida"}, status=400)
+
+
 async def api_info(request):
     """GET: informações do sistema e serviços."""
     data = {}
@@ -253,6 +289,7 @@ def create_app():
     app.router.add_post("/api/channels", api_channels)
     app.router.add_post("/api/media", api_media)
     app.router.add_post("/api/toast", api_toast)
+    app.router.add_post("/api/remote", api_remote)
     app.router.add_get("/api/info", api_info)
 
     return app

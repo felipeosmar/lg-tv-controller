@@ -141,6 +141,7 @@ class LGTVClient:
         self._callbacks: dict[str, asyncio.Future] = {}
         self._subscriptions: dict[str, Callable] = {}
         self._listener_task: asyncio.Task | None = None
+        self._pointer_ws = None
         self._connected = False
         self._load_key()
 
@@ -405,6 +406,90 @@ class LGTVClient:
 
     async def screen_on(self) -> dict:
         return await self.request(SSAP["screen_on"])
+
+    async def connect_pointer(self) -> bool:
+        """Conecta ao socket de pointer/input (emulação do Magic Remote)."""
+        if not self.is_connected:
+            raise ConnectionError("Não conectado à TV.")
+        
+        result = await self.request(SSAP["pointer_socket"])
+        socket_path = result.get("socketPath", "")
+        if not socket_path:
+            logger.error("Não foi possível obter o socket de pointer.")
+            return False
+
+        ssl_context = None
+        if self.use_ssl:
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+        try:
+            self._pointer_ws = await asyncio.wait_for(
+                websockets.connect(socket_path, ssl=ssl_context, ping_interval=None),
+                timeout=10.0,
+            )
+            logger.info("Pointer socket conectado.")
+            return True
+        except Exception as e:
+            logger.error(f"Falha ao conectar pointer socket: {e}")
+            self._pointer_ws = None
+            return False
+
+    async def _send_pointer(self, data: str):
+        """Envia comando ao pointer socket."""
+        if not hasattr(self, '_pointer_ws') or self._pointer_ws is None:
+            await self.connect_pointer()
+        if self._pointer_ws:
+            await self._pointer_ws.send(data)
+
+    async def pointer_move(self, dx: int, dy: int, drag: bool = False):
+        """Move o cursor (relativo)."""
+        down = 1 if drag else 0
+        await self._send_pointer(f"type:move\ndx:{dx}\ndy:{dy}\ndown:{down}\n\n")
+
+    async def pointer_click(self):
+        """Clica na posição atual do cursor."""
+        await self._send_pointer("type:click\n\n")
+
+    async def pointer_scroll(self, dx: int = 0, dy: int = 0):
+        """Scroll (dy negativo = scroll up, positivo = scroll down)."""
+        await self._send_pointer(f"type:scroll\ndx:{dx}\ndy:{dy}\n\n")
+
+    async def send_button(self, name: str):
+        """Envia comando de botão do controle remoto.
+        
+        Botões disponíveis:
+        HOME, BACK, UP, DOWN, LEFT, RIGHT, ENTER, EXIT,
+        RED, GREEN, YELLOW, BLUE, MUTE, VOLUMEUP, VOLUMEDOWN,
+        CHANNELUP, CHANNELDOWN, PLAY, PAUSE, STOP, REWIND, FASTFORWARD,
+        MENU, INFO, CC, DASH, PREVIOUS, GUIDE, NUMBER_0..NUMBER_9, LIST
+        """
+        await self._send_pointer(f"type:button\nname:{name}\n\n")
+
+    async def send_text(self, text: str):
+        """Envia texto para o campo de input ativo na TV."""
+        return await self.request(
+            "ssap://com.webos.service.ime/insertText",
+            {"text": text, "replace": 0}
+        )
+
+    async def send_enter(self):
+        """Confirma input de texto."""
+        return await self.request("ssap://com.webos.service.ime/sendEnterKey")
+
+    async def send_delete(self, count: int = 1):
+        """Deleta caracteres no campo de input."""
+        return await self.request(
+            "ssap://com.webos.service.ime/deleteCharacters",
+            {"count": count}
+        )
+
+    async def disconnect_pointer(self):
+        """Desconecta o pointer socket."""
+        if hasattr(self, '_pointer_ws') and self._pointer_ws:
+            await self._pointer_ws.close()
+            self._pointer_ws = None
 
     @staticmethod
     def wake_on_lan(mac: str, broadcast: str = "255.255.255.255", port: int = 9):
