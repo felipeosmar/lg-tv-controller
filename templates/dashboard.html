@@ -45,6 +45,9 @@
                 <i class="bi bi-tv"></i> LG TV Controller
             </span>
             <div class="d-flex align-items-center gap-3">
+                <span id="nowPlaying" class="text-muted small d-none">
+                    <i class="bi bi-broadcast-pin"></i> <span id="nowPlayingText"></span>
+                </span>
                 <span id="statusText" class="text-muted small">Desconectado</span>
                 <span id="statusDot" class="status-dot disconnected"></span>
                 <button id="btnConnect" class="btn btn-sm btn-tv btn-success-tv" onclick="toggleConnection()">
@@ -456,6 +459,10 @@
     <script>
         let isMuted = false;
         let isConnected = false;
+        let currentApp = '';
+        let currentChannel = '';
+        let currentChannelNumber = '';
+        let eventSource = null;
 
         function log(msg, type = 'info') {
             const area = document.getElementById('logArea');
@@ -463,6 +470,110 @@
             const cls = type === 'error' ? 'error' : type === 'success' ? 'success' : '';
             area.innerHTML += `<div class="log-entry ${cls}">[${time}] ${msg}</div>`;
             area.scrollTop = area.scrollHeight;
+        }
+
+        // ─── SSE: Eventos em tempo real ────────────────────────
+        function connectSSE() {
+            if (eventSource) eventSource.close();
+            eventSource = new EventSource('/api/events');
+
+            eventSource.addEventListener('init', (e) => {
+                const d = JSON.parse(e.data);
+                updateConnectionUI(d.connected);
+                if (d.volume !== undefined) updateVolume(d.volume, d.muted);
+                if (d.foreground_app) updateForeground(d.foreground_app);
+                if (d.channel) updateChannel(d.channelNumber, d.channel);
+                log('🔌 SSE conectado — eventos em tempo real', 'success');
+            });
+
+            eventSource.addEventListener('volume', (e) => {
+                const d = JSON.parse(e.data);
+                updateVolume(d.volume, d.muted);
+            });
+
+            eventSource.addEventListener('channel', (e) => {
+                const d = JSON.parse(e.data);
+                updateChannel(d.channelNumber, d.channelName);
+            });
+
+            eventSource.addEventListener('foreground', (e) => {
+                const d = JSON.parse(e.data);
+                updateForeground(d.appId);
+            });
+
+            eventSource.addEventListener('power', (e) => {
+                const d = JSON.parse(e.data);
+                updatePowerState(d.state);
+            });
+
+            eventSource.addEventListener('connection', (e) => {
+                const d = JSON.parse(e.data);
+                updateConnectionUI(d.connected);
+                if (d.connected) log('📺 TV conectada', 'success');
+                else log('📺 TV desconectada', 'error');
+            });
+
+            eventSource.onerror = () => {
+                log('⚠️ SSE desconectado, reconectando...', 'error');
+            };
+        }
+
+        function updateVolume(vol, muted) {
+            document.getElementById('volumeSlider').value = vol;
+            document.getElementById('volumeValue').textContent = vol;
+            isMuted = muted;
+            const muteBtn = document.getElementById('btnMute');
+            muteBtn.className = muted ? 'btn btn-tv btn-danger-tv w-100' : 'btn btn-tv w-100';
+            muteBtn.innerHTML = muted
+                ? '<i class="bi bi-volume-mute-fill"></i> Mudo (ativado)'
+                : '<i class="bi bi-volume-mute-fill"></i> Mudo';
+            updateTvInfo();
+        }
+
+        function updateChannel(number, name) {
+            currentChannel = name || '';
+            currentChannelNumber = number || '';
+            updateTvInfo();
+            if (name) log(`📡 Canal: ${number} — ${name}`);
+        }
+
+        function updateForeground(appId) {
+            currentApp = appId || '';
+            const np = document.getElementById('nowPlaying');
+            const npText = document.getElementById('nowPlayingText');
+            if (appId) {
+                // Nomes amigáveis
+                const names = {
+                    'netflix': 'Netflix', 'youtube.leanback.v4': 'YouTube',
+                    'amazon.lovefilm.de': 'Prime Video', 'com.disney.disneyplus-prod': 'Disney+',
+                    'spotify-beehive': 'Spotify', 'com.webos.app.livetv': 'TV ao vivo',
+                    'com.webos.app.browser': 'Browser', 'com.webos.app.hdmi1': 'HDMI 1',
+                    'com.webos.app.hdmi2': 'HDMI 2', 'com.webos.app.hdmi3': 'HDMI 3',
+                };
+                npText.textContent = names[appId] || appId;
+                np.classList.remove('d-none');
+            } else {
+                np.classList.add('d-none');
+            }
+            updateTvInfo();
+        }
+
+        function updatePowerState(state) {
+            if (state === 'Suspend' || state === 'Active Standby') {
+                log('⏸️ TV em standby', 'error');
+                updateConnectionUI(false);
+            } else if (state === 'Active') {
+                log('▶️ TV ativa');
+            }
+        }
+
+        function updateTvInfo() {
+            let html = '';
+            html += `<div class="mb-1"><i class="bi bi-volume-up"></i> <strong>Volume:</strong> ${document.getElementById('volumeSlider').value} ${isMuted ? '<span class="badge bg-danger">Mudo</span>' : ''}</div>`;
+            if (currentApp) html += `<div class="mb-1"><i class="bi bi-app"></i> <strong>App:</strong> <code>${currentApp}</code></div>`;
+            if (currentChannel) html += `<div class="mb-1"><i class="bi bi-broadcast"></i> <strong>Canal:</strong> ${currentChannelNumber} — ${currentChannel}</div>`;
+            html += `<div class="mt-2"><span class="badge ${isConnected ? 'bg-success' : 'bg-secondary'}"><i class="bi bi-activity"></i> Eventos em tempo real</span></div>`;
+            document.getElementById('tvInfo').innerHTML = html;
         }
 
         async function apiPost(url, data) {
@@ -478,7 +589,6 @@
                 } else {
                     log(`❌ ${result.message}`, 'error');
                 }
-                refreshStatus();
                 return result;
             } catch (e) {
                 log(`❌ Erro: ${e.message}`, 'error');
@@ -508,7 +618,6 @@
                 btn.disabled = false;
                 if (result && result.ok) {
                     updateConnectionUI(true);
-                    refreshStatus();
                 } else {
                     updateConnectionUI(false);
                 }
@@ -528,25 +637,7 @@
             btn.className = connected
                 ? 'btn btn-sm btn-tv btn-danger-tv'
                 : 'btn btn-sm btn-tv btn-success-tv';
-        }
-
-        async function refreshStatus() {
-            const data = await apiGet('/api/status');
-            if (!data) return;
-            updateConnectionUI(data.connected);
-            if (data.connected) {
-                document.getElementById('volumeSlider').value = data.volume || 0;
-                document.getElementById('volumeValue').textContent = data.volume || 0;
-                isMuted = data.muted || false;
-                document.getElementById('btnMute').className = isMuted
-                    ? 'btn btn-tv btn-danger-tv w-100' : 'btn btn-tv w-100';
-
-                let infoHtml = `<div class="mb-2"><strong>Volume:</strong> ${data.volume || 0} ${data.muted ? '(Mudo)' : ''}</div>`;
-                if (data.foreground_app) {
-                    infoHtml += `<div><strong>App:</strong> ${data.foreground_app}</div>`;
-                }
-                document.getElementById('tvInfo').innerHTML = infoHtml;
-            }
+            updateTvInfo();
         }
 
         async function powerOn() {
@@ -560,7 +651,6 @@
                     const conn = await apiPost('/api/connect', {});
                     if (conn && conn.ok) {
                         updateConnectionUI(true);
-                        refreshStatus();
                     } else {
                         log('TV ainda não respondeu. Tente conectar manualmente em alguns segundos.', 'error');
                     }
@@ -656,9 +746,6 @@
             log('Info do sistema carregada.', 'success');
         }
 
-        // Auto-refresh a cada 5s quando conectado
-        setInterval(() => { if (isConnected) refreshStatus(); }, 5000);
-
         // Presets
         async function loadPresets() {
             const presets = await apiGet('/api/presets');
@@ -698,7 +785,6 @@
             const result = await apiPost('/api/presets', {action: 'execute', id});
             if (result && result.ok) {
                 log(`✅ ${result.preset}: ${result.results.join(', ')}`, 'success');
-                setTimeout(refreshStatus, 1500);
             }
         }
 
@@ -766,8 +852,8 @@
             loadPresets();
         }
 
-        // Checar status ao carregar
-        refreshStatus();
+        // Inicialização: SSE + presets
+        connectSSE();
         loadPresets();
 
         // Screenshot

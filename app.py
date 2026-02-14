@@ -1,12 +1,14 @@
 """
 LG TV Controller — Dashboard Web para controle da TV LG 65UQ8050PSB.
 Sprint 1: Conexão, volume, mute, power, apps, inputs, controles de mídia.
+Sprint 3: Server-Sent Events (SSE) com subscriptions SSAP em tempo real.
 """
 
 import asyncio
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 import aiohttp_jinja2
@@ -30,6 +32,76 @@ WEB_PORT = int(os.environ.get("WEB_PORT", "8888"))
 
 tv = LGTVClient(TV_HOST, TV_PORT)
 
+# ─── SSE: Gerenciamento de clientes conectados ──────────────
+
+sse_clients: set[web.StreamResponse] = set()
+_subscriptions_active = False
+_subscription_ids: list[str] = []
+
+
+async def sse_broadcast(event: str, data: dict):
+    """Envia evento SSE para todos os clientes conectados."""
+    payload = f"event: {event}\ndata: {json.dumps(data)}\n\n"
+    dead = set()
+    for client in sse_clients:
+        try:
+            await client.write(payload.encode("utf-8"))
+        except (ConnectionResetError, ConnectionError, Exception):
+            dead.add(client)
+    for d in dead:
+        sse_clients.discard(d)
+
+
+async def setup_subscriptions():
+    """Inscreve nos eventos SSAP da TV e faz broadcast via SSE."""
+    global _subscriptions_active, _subscription_ids
+
+    if _subscriptions_active or not tv.is_connected:
+        return
+
+    _subscription_ids = []
+
+    async def _sub(uri, event_name, extractor):
+        try:
+            def callback(msg):
+                return sse_broadcast(event_name, extractor(msg.get("payload", {})))
+            sid = await tv.subscribe(uri, callback)
+            _subscription_ids.append(sid)
+            logger.info(f"Subscribed: {event_name} ({uri})")
+        except Exception as e:
+            logger.warning(f"Falha ao subscribir {event_name}: {e}")
+
+    await _sub(
+        SSAP["get_volume"], "volume",
+        lambda p: {"volume": p.get("volume", 0), "muted": p.get("muted", False)}
+    )
+    await _sub(
+        SSAP["get_current_channel"], "channel",
+        lambda p: {
+            "channelId": p.get("channelId", ""),
+            "channelName": p.get("channelName", ""),
+            "channelNumber": p.get("channelNumber", ""),
+        }
+    )
+    await _sub(
+        SSAP["get_foreground"], "foreground",
+        lambda p: {"appId": p.get("appId", ""), "processId": p.get("processId", "")}
+    )
+    await _sub(
+        SSAP["power_state"], "power",
+        lambda p: {"state": p.get("state", "Unknown"), "processing": p.get("processing", "")}
+    )
+
+    _subscriptions_active = True
+    logger.info(f"Subscriptions ativas: {len(_subscription_ids)}")
+
+
+def teardown_subscriptions():
+    """Limpa estado de subscriptions (chamado no disconnect)."""
+    global _subscriptions_active, _subscription_ids
+    _subscriptions_active = False
+    _subscription_ids = []
+
 
 # ─── API Routes ─────────────────────────────────────────────
 
@@ -37,6 +109,9 @@ async def api_connect(request):
     """Conecta à TV."""
     try:
         ok = await tv.connect(timeout=15.0)
+        if ok:
+            await setup_subscriptions()
+            await sse_broadcast("connection", {"connected": True})
         return web.json_response({"ok": ok, "message": "Conectado" if ok else "Falha na conexão"})
     except Exception as e:
         return web.json_response({"ok": False, "message": str(e)}, status=500)
@@ -44,8 +119,64 @@ async def api_connect(request):
 
 async def api_disconnect(request):
     """Desconecta da TV."""
+    teardown_subscriptions()
     await tv.disconnect()
+    await sse_broadcast("connection", {"connected": False})
     return web.json_response({"ok": True, "message": "Desconectado"})
+
+
+async def api_events(request):
+    """SSE endpoint — stream de eventos em tempo real."""
+    response = web.StreamResponse(
+        status=200,
+        reason="OK",
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    await response.prepare(request)
+
+    sse_clients.add(response)
+    logger.info(f"SSE client conectado ({len(sse_clients)} total)")
+
+    # Envia estado atual como evento inicial
+    init_data = {"connected": tv.is_connected}
+    if tv.is_connected:
+        try:
+            vol = await tv.get_volume()
+            init_data["volume"] = vol.get("volume", 0)
+            init_data["muted"] = vol.get("muted", False)
+        except Exception:
+            pass
+        try:
+            fg = await tv.get_foreground_app()
+            init_data["foreground_app"] = fg.get("appId", "")
+        except Exception:
+            pass
+        try:
+            ch = await tv.get_current_channel()
+            init_data["channel"] = ch.get("channelName", "")
+            init_data["channelNumber"] = ch.get("channelNumber", "")
+        except Exception:
+            pass
+
+    await response.write(f"event: init\ndata: {json.dumps(init_data)}\n\n".encode("utf-8"))
+
+    # Keep-alive loop
+    try:
+        while True:
+            await asyncio.sleep(15)
+            await response.write(b": keepalive\n\n")
+    except (ConnectionResetError, ConnectionError, asyncio.CancelledError):
+        pass
+    finally:
+        sse_clients.discard(response)
+        logger.info(f"SSE client desconectado ({len(sse_clients)} total)")
+
+    return response
 
 
 async def api_status(request):
@@ -376,6 +507,7 @@ def create_app():
 
     # Routes
     app.router.add_get("/", dashboard)
+    app.router.add_get("/api/events", api_events)
     app.router.add_post("/api/connect", api_connect)
     app.router.add_post("/api/disconnect", api_disconnect)
     app.router.add_get("/api/status", api_status)

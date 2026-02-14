@@ -267,7 +267,10 @@ class LGTVClient:
                 # Subscription callback
                 if msg_id in self._subscriptions:
                     try:
-                        self._subscriptions[msg_id](msg)
+                        result = self._subscriptions[msg_id](msg)
+                        # Suporta callbacks que retornam coroutines
+                        if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                            await result
                     except Exception as e:
                         logger.error(f"Erro em subscription callback: {e}")
         except websockets.exceptions.ConnectionClosed:
