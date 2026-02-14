@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LG TV Controller</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        :root { --bs-body-bg: #1a1a2e; --bs-body-color: #e0e0e0; }
+        body { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); min-height: 100vh; color: #e0e0e0; }
+        .card { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
+        .card-header { background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .btn-tv { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff; transition: all 0.2s; }
+        .btn-tv:hover { background: rgba(255,255,255,0.2); color: #fff; transform: scale(1.05); }
+        .btn-tv:active { transform: scale(0.95); }
+        .btn-tv.btn-danger-tv { background: rgba(220,53,69,0.3); border-color: rgba(220,53,69,0.5); }
+        .btn-tv.btn-danger-tv:hover { background: rgba(220,53,69,0.5); }
+        .btn-tv.btn-success-tv { background: rgba(25,135,84,0.3); border-color: rgba(25,135,84,0.5); }
+        .btn-tv.btn-success-tv:hover { background: rgba(25,135,84,0.5); }
+        .btn-tv.btn-primary-tv { background: rgba(13,110,253,0.3); border-color: rgba(13,110,253,0.5); }
+        .btn-tv.btn-primary-tv:hover { background: rgba(13,110,253,0.5); }
+        .btn-tv.btn-warning-tv { background: rgba(255,193,7,0.3); border-color: rgba(255,193,7,0.5); color: #ffc107; }
+        .btn-tv.btn-warning-tv:hover { background: rgba(255,193,7,0.5); }
+        .status-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+        .status-dot.connected { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
+        .status-dot.disconnected { background: #ff4444; box-shadow: 0 0 8px #ff4444; }
+        .volume-slider { width: 100%; accent-color: #00ff88; }
+        .app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; max-height: 300px; overflow-y: auto; }
+        .app-btn { font-size: 0.75rem; padding: 8px 4px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .quick-apps { display: flex; flex-wrap: wrap; gap: 6px; }
+        .log-area { font-family: monospace; font-size: 0.8rem; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 10px; }
+        .log-entry { margin-bottom: 2px; opacity: 0.8; }
+        .log-entry.error { color: #ff6b6b; }
+        .log-entry.success { color: #51cf66; }
+        h5 { font-weight: 600; }
+        .navbar-brand { font-weight: 700; letter-spacing: 1px; }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-dark py-2" style="background: rgba(0,0,0,0.3);">
+        <div class="container-fluid">
+            <span class="navbar-brand">
+                <i class="bi bi-tv"></i> LG TV Controller
+            </span>
+            <div class="d-flex align-items-center gap-3">
+                <span id="statusText" class="text-muted small">Desconectado</span>
+                <span id="statusDot" class="status-dot disconnected"></span>
+                <button id="btnConnect" class="btn btn-sm btn-tv btn-success-tv" onclick="toggleConnection()">
+                    <i class="bi bi-plug"></i> Conectar
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-3">
+        <div class="row g-3">
+            <!-- Coluna 1: Controles principais -->
+            <div class="col-lg-4">
+                <!-- Power -->
+                <div class="card mb-3">
+                    <div class="card-header"><h5 class="mb-0"><i class="bi bi-power"></i> Energia</h5></div>
+                    <div class="card-body d-flex gap-2 flex-wrap">
+                        <button class="btn btn-tv btn-danger-tv" onclick="apiPost('/api/power', {action:'off'})">
+                            <i class="bi bi-power"></i> Desligar
+                        </button>
+                        <button class="btn btn-tv btn-warning-tv" onclick="apiPost('/api/power', {action:'screen_off'})">
+                            <i class="bi bi-display"></i> Tela Off
+                        </button>
+                        <button class="btn btn-tv btn-success-tv" onclick="apiPost('/api/power', {action:'screen_on'})">
+                            <i class="bi bi-display-fill"></i> Tela On
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Volume -->
+                <div class="card mb-3">
+                    <div class="card-header"><h5 class="mb-0"><i class="bi bi-volume-up"></i> Volume</h5></div>
+                    <div class="card-body">
+                        <div class="d-flex align-items-center gap-3 mb-3">
+                            <button class="btn btn-tv" onclick="apiPost('/api/volume', {action:'down'})">
+                                <i class="bi bi-volume-down-fill fs-4"></i>
+                            </button>
+                            <input type="range" class="volume-slider flex-grow-1" id="volumeSlider" min="0" max="100" value="0"
+                                   oninput="document.getElementById('volumeValue').textContent = this.value"
+                                   onchange="apiPost('/api/volume', {action:'set', level: parseInt(this.value)})">
+                            <button class="btn btn-tv" onclick="apiPost('/api/volume', {action:'up'})">
+                                <i class="bi bi-volume-up-fill fs-4"></i>
+                            </button>
+                            <span id="volumeValue" class="badge bg-secondary fs-6" style="min-width:40px">0</span>
+                        </div>
+                        <button id="btnMute" class="btn btn-tv w-100" onclick="toggleMute()">
+                            <i class="bi bi-volume-mute-fill"></i> Mudo
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Controles de Mídia -->
+                <div class="card mb-3">
+                    <div class="card-header"><h5 class="mb-0"><i class="bi bi-play-circle"></i> Mídia</h5></div>
+                    <div class="card-body d-flex gap-2 justify-content-center flex-wrap">
+                        <button class="btn btn-tv" onclick="apiPost('/api/media', {action:'rewind'})">
+                            <i class="bi bi-skip-backward-fill fs-4"></i>
+                        </button>
+                        <button class="btn btn-tv btn-success-tv" onclick="apiPost('/api/media', {action:'play'})">
+                            <i class="bi bi-play-fill fs-4"></i>
+                        </button>
+                        <button class="btn btn-tv btn-warning-tv" onclick="apiPost('/api/media', {action:'pause'})">
+                            <i class="bi bi-pause-fill fs-4"></i>
+                        </button>
+                        <button class="btn btn-tv btn-danger-tv" onclick="apiPost('/api/media', {action:'stop'})">
+                            <i class="bi bi-stop-fill fs-4"></i>
+                        </button>
+                        <button class="btn btn-tv" onclick="apiPost('/api/media', {action:'fast_forward'})">
+                            <i class="bi bi-skip-forward-fill fs-4"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Canais -->
+                <div class="card mb-3">
+                    <div class="card-header"><h5 class="mb-0"><i class="bi bi-broadcast"></i> Canais</h5></div>
+                    <div class="card-body d-flex gap-2 justify-content-center">
+                        <button class="btn btn-tv" onclick="apiPost('/api/channels', {action:'down'})">
+                            <i class="bi bi-chevron-down fs-4"></i>
+                        </button>
+                        <button class="btn btn-tv btn-primary-tv" onclick="loadChannels()">
+                            <i class="bi bi-list-ul"></i> Lista
+                        </button>
+                        <button class="btn btn-tv" onclick="apiPost('/api/channels', {action:'up'})">
+                            <i class="bi bi-chevron-up fs-4"></i>
+                        </button>
+                    </div>
+                    <div id="channelList" class="card-body d-none">
+                        <select id="channelSelect" class="form-select bg-dark text-light border-secondary" size="5"
+                                onchange="apiPost('/api/channels', {action:'set', channel_id: this.value})"></select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Coluna 2: Apps e Inputs -->
+            <div class="col-lg-4">
+                <!-- Apps Rápidos -->
+                <div class="card mb-3">
+                    <div class="card-header"><h5 class="mb-0"><i class="bi bi-grid"></i> Apps Rápidos</h5></div>
+                    <div class="card-body quick-apps">
+                        <button class="btn btn-tv" onclick="launchApp('netflix')">
+                            <i class="bi bi-film"></i> Netflix
+                        </button>
+                        <button class="btn btn-tv" onclick="launchApp('youtube')">
+                            <i class="bi bi-youtube"></i> YouTube
+                        </button>
+                        <button class="btn btn-tv" onclick="launchApp('amazon_prime')">
+                            <i class="bi bi-play-btn"></i> Prime
+                        </button>
+                        <button class="btn btn-tv" onclick="launchApp('disney_plus')">
+                            <i class="bi bi-stars"></i> Disney+
+                        </button>
+                        <button class="btn btn-tv" onclick="launchApp('spotify')">
+                            <i class="bi bi-spotify"></i> Spotify
+                        </button>
+                        <button class="btn btn-tv" onclick="launchApp('browser')">
+                            <i class="bi bi-globe"></i> Browser
+                        </button>
+                        <button class="btn btn-tv" onclick="launchApp('live_tv')">
+                            <i class="bi bi-broadcast"></i> TV
+                        </button>
+                        <button class="btn btn-tv" onclick="launchApp('settings')">
+                            <i class="bi bi-gear"></i> Config
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Inputs / Fontes -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-hdmi-port"></i> Entradas</h5>
+                        <button class="btn btn-sm btn-tv" onclick="loadInputs()"><i class="bi bi-arrow-clockwise"></i></button>
+                    </div>
+                    <div class="card-body" id="inputsList">
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-tv" onclick="apiPost('/api/apps', {action:'launch', app_id:'hdmi1'})">
+                                <i class="bi bi-hdmi-port"></i> HDMI 1
+                            </button>
+                            <button class="btn btn-tv" onclick="apiPost('/api/apps', {action:'launch', app_id:'hdmi2'})">
+                                <i class="bi bi-hdmi-port"></i> HDMI 2
+                            </button>
+                            <button class="btn btn-tv" onclick="apiPost('/api/apps', {action:'launch', app_id:'hdmi3'})">
+                                <i class="bi bi-hdmi-port"></i> HDMI 3
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Todos os Apps -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-app-indicator"></i> Todos os Apps</h5>
+                        <button class="btn btn-sm btn-tv" onclick="loadApps()"><i class="bi bi-arrow-clockwise"></i></button>
+                    </div>
+                    <div class="card-body">
+                        <div id="allApps" class="app-grid">
+                            <p class="text-muted">Clique em <i class="bi bi-arrow-clockwise"></i> para carregar</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Coluna 3: Info e Toast -->
+            <div class="col-lg-4">
+                <!-- Info do App Atual -->
+                <div class="card mb-3">
+                    <div class="card-header"><h5 class="mb-0"><i class="bi bi-info-circle"></i> Status da TV</h5></div>
+                    <div class="card-body">
+                        <div id="tvInfo">
+                            <p class="text-muted">Conecte para ver informações</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Toast / Notificação -->
+                <div class="card mb-3">
+                    <div class="card-header"><h5 class="mb-0"><i class="bi bi-chat-dots"></i> Notificação</h5></div>
+                    <div class="card-body">
+                        <div class="input-group">
+                            <input type="text" id="toastMsg" class="form-control bg-dark text-light border-secondary"
+                                   placeholder="Mensagem para a TV..." value="Olá da Dashboard! 📺">
+                            <button class="btn btn-tv btn-primary-tv" onclick="sendToast()">
+                                <i class="bi bi-send"></i>
+                            </button>
+                        </div>
+                        <small class="text-muted mt-1 d-block">⚠️ Pode não funcionar no webOS 22 (restrição de permissão)</small>
+                    </div>
+                </div>
+
+                <!-- System Info -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-cpu"></i> Sistema</h5>
+                        <button class="btn btn-sm btn-tv" onclick="loadSystemInfo()"><i class="bi bi-arrow-clockwise"></i></button>
+                    </div>
+                    <div class="card-body">
+                        <div id="systemInfo">
+                            <p class="text-muted">Clique em <i class="bi bi-arrow-clockwise"></i> para carregar</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Log -->
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-terminal"></i> Log</h5>
+                        <button class="btn btn-sm btn-tv" onclick="document.getElementById('logArea').innerHTML=''">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="logArea" class="log-area"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isMuted = false;
+        let isConnected = false;
+
+        function log(msg, type = 'info') {
+            const area = document.getElementById('logArea');
+            const time = new Date().toLocaleTimeString('pt-BR');
+            const cls = type === 'error' ? 'error' : type === 'success' ? 'success' : '';
+            area.innerHTML += `<div class="log-entry ${cls}">[${time}] ${msg}</div>`;
+            area.scrollTop = area.scrollHeight;
+        }
+
+        async function apiPost(url, data) {
+            try {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await resp.json();
+                if (result.ok) {
+                    log(`✅ ${url.split('/').pop()}: ${JSON.stringify(data)}`, 'success');
+                } else {
+                    log(`❌ ${result.message}`, 'error');
+                }
+                refreshStatus();
+                return result;
+            } catch (e) {
+                log(`❌ Erro: ${e.message}`, 'error');
+            }
+        }
+
+        async function apiGet(url) {
+            try {
+                const resp = await fetch(url);
+                return await resp.json();
+            } catch (e) {
+                log(`❌ GET ${url}: ${e.message}`, 'error');
+                return null;
+            }
+        }
+
+        async function toggleConnection() {
+            const btn = document.getElementById('btnConnect');
+            if (isConnected) {
+                await apiPost('/api/disconnect', {});
+                updateConnectionUI(false);
+            } else {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Conectando...';
+                log('Conectando à TV... (aceite na tela se for a primeira vez)');
+                const result = await apiPost('/api/connect', {});
+                btn.disabled = false;
+                if (result && result.ok) {
+                    updateConnectionUI(true);
+                    refreshStatus();
+                } else {
+                    updateConnectionUI(false);
+                }
+            }
+        }
+
+        function updateConnectionUI(connected) {
+            isConnected = connected;
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            const btn = document.getElementById('btnConnect');
+            dot.className = 'status-dot ' + (connected ? 'connected' : 'disconnected');
+            text.textContent = connected ? 'Conectado' : 'Desconectado';
+            btn.innerHTML = connected
+                ? '<i class="bi bi-plug-fill"></i> Desconectar'
+                : '<i class="bi bi-plug"></i> Conectar';
+            btn.className = connected
+                ? 'btn btn-sm btn-tv btn-danger-tv'
+                : 'btn btn-sm btn-tv btn-success-tv';
+        }
+
+        async function refreshStatus() {
+            const data = await apiGet('/api/status');
+            if (!data) return;
+            updateConnectionUI(data.connected);
+            if (data.connected) {
+                document.getElementById('volumeSlider').value = data.volume || 0;
+                document.getElementById('volumeValue').textContent = data.volume || 0;
+                isMuted = data.muted || false;
+                document.getElementById('btnMute').className = isMuted
+                    ? 'btn btn-tv btn-danger-tv w-100' : 'btn btn-tv w-100';
+
+                let infoHtml = `<div class="mb-2"><strong>Volume:</strong> ${data.volume || 0} ${data.muted ? '(Mudo)' : ''}</div>`;
+                if (data.foreground_app) {
+                    infoHtml += `<div><strong>App:</strong> ${data.foreground_app}</div>`;
+                }
+                document.getElementById('tvInfo').innerHTML = infoHtml;
+            }
+        }
+
+        async function toggleMute() {
+            isMuted = !isMuted;
+            await apiPost('/api/volume', {action: 'mute', mute: isMuted});
+        }
+
+        function launchApp(appId) {
+            apiPost('/api/apps', {action: 'launch', app_id: appId});
+        }
+
+        async function loadApps() {
+            log('Carregando lista de apps...');
+            const apps = await apiGet('/api/apps');
+            if (!apps) return;
+            const container = document.getElementById('allApps');
+            container.innerHTML = '';
+            apps.forEach(app => {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-tv app-btn';
+                btn.title = app.title;
+                btn.textContent = app.title;
+                btn.onclick = () => apiPost('/api/apps', {action: 'launch', app_id: app.id});
+                container.appendChild(btn);
+            });
+            log(`${apps.length} apps carregados.`, 'success');
+        }
+
+        async function loadInputs() {
+            const inputs = await apiGet('/api/inputs');
+            if (!inputs) return;
+            const container = document.getElementById('inputsList');
+            container.innerHTML = '';
+            const wrap = document.createElement('div');
+            wrap.className = 'd-flex gap-2 flex-wrap';
+            inputs.forEach(inp => {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-tv' + (inp.connected ? ' btn-success-tv' : '');
+                btn.innerHTML = `<i class="bi bi-hdmi-port"></i> ${inp.label}`;
+                btn.onclick = () => apiPost('/api/inputs', {input_id: inp.id});
+                wrap.appendChild(btn);
+            });
+            container.appendChild(wrap);
+        }
+
+        async function loadChannels() {
+            const channels = await apiGet('/api/channels');
+            if (!channels) return;
+            const select = document.getElementById('channelSelect');
+            select.innerHTML = '';
+            channels.forEach(ch => {
+                const opt = document.createElement('option');
+                opt.value = ch.id;
+                opt.textContent = `${ch.number} — ${ch.name}`;
+                select.appendChild(opt);
+            });
+            document.getElementById('channelList').classList.remove('d-none');
+            log(`${channels.length} canais carregados.`, 'success');
+        }
+
+        async function sendToast() {
+            const msg = document.getElementById('toastMsg').value;
+            if (msg) await apiPost('/api/toast', {message: msg});
+        }
+
+        async function loadSystemInfo() {
+            const data = await apiGet('/api/info');
+            if (!data) return;
+            const container = document.getElementById('systemInfo');
+            let html = '<div class="small">';
+            if (data.system) {
+                const labels = {modelName:'Modelo', serialNumber:'Nº Série', receiverType:'Receptor'};
+                for (const [k, v] of Object.entries(data.system)) {
+                    if (k === 'returnValue') continue;
+                    const label = labels[k] || k;
+                    html += `<div><strong>${label}:</strong> ${JSON.stringify(v)}</div>`;
+                }
+            }
+            if (data.foreground) {
+                html += `<div class="mt-2"><strong>App Atual:</strong> ${data.foreground.appId || '?'}</div>`;
+            }
+            if (data.services) {
+                html += `<div class="mt-2"><strong>Serviços:</strong> ${data.services.length} disponíveis</div>`;
+                html += `<div class="text-muted" style="font-size:0.7rem">${data.services.join(', ')}</div>`;
+            }
+            html += '</div>';
+            container.innerHTML = html;
+            log('Info do sistema carregada.', 'success');
+        }
+
+        // Auto-refresh a cada 5s quando conectado
+        setInterval(() => { if (isConnected) refreshStatus(); }, 5000);
+
+        // Checar status ao carregar
+        refreshStatus();
+
+        // Atalhos de teclado
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT') return;
+            switch(e.key) {
+                case 'ArrowUp': apiPost('/api/volume', {action:'up'}); break;
+                case 'ArrowDown': apiPost('/api/volume', {action:'down'}); break;
+                case 'ArrowRight': apiPost('/api/channels', {action:'up'}); break;
+                case 'ArrowLeft': apiPost('/api/channels', {action:'down'}); break;
+                case 'm': toggleMute(); break;
+                case ' ': e.preventDefault(); apiPost('/api/media', {action:'pause'}); break;
+            }
+        });
+    </script>
+</body>
+</html>
