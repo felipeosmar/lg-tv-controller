@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 TV_HOST = os.environ.get("TV_HOST", "192.168.15.3")
 TV_PORT = int(os.environ.get("TV_PORT", "3001"))
+TV_MAC = os.environ.get("TV_MAC", "AC:5A:F0:C4:DD:F2")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8888"))
 
 tv = LGTVClient(TV_HOST, TV_PORT)
@@ -84,6 +85,12 @@ async def api_power(request):
     action = body.get("action", "off")
     if action == "off":
         result = await tv.power_off()
+    elif action == "on":
+        try:
+            tv.wake_on_lan(TV_MAC)
+            return web.json_response({"ok": True, "message": f"Magic Packet enviado para {TV_MAC}"})
+        except Exception as e:
+            return web.json_response({"ok": False, "message": str(e)}, status=500)
     elif action == "screen_off":
         result = await tv.screen_off()
     elif action == "screen_on":

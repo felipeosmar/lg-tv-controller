@@ -62,6 +62,9 @@
                 <div class="card mb-3">
                     <div class="card-header"><h5 class="mb-0"><i class="bi bi-power"></i> Energia</h5></div>
                     <div class="card-body d-flex gap-2 flex-wrap">
+                        <button class="btn btn-tv btn-success-tv" onclick="powerOn()">
+                            <i class="bi bi-power"></i> Ligar (WOL)
+                        </button>
                         <button class="btn btn-tv btn-danger-tv" onclick="apiPost('/api/power', {action:'off'})">
                             <i class="bi bi-power"></i> Desligar
                         </button>
@@ -356,6 +359,25 @@
                     infoHtml += `<div><strong>App:</strong> ${data.foreground_app}</div>`;
                 }
                 document.getElementById('tvInfo').innerHTML = infoHtml;
+            }
+        }
+
+        async function powerOn() {
+            log('Enviando Magic Packet (WOL)...');
+            const result = await apiPost('/api/power', {action: 'on'});
+            if (result && result.ok) {
+                log('Magic Packet enviado! A TV pode levar alguns segundos para ligar.', 'success');
+                // Auto-retry connection after 8 seconds
+                setTimeout(async () => {
+                    log('Tentando conectar à TV...');
+                    const conn = await apiPost('/api/connect', {});
+                    if (conn && conn.ok) {
+                        updateConnectionUI(true);
+                        refreshStatus();
+                    } else {
+                        log('TV ainda não respondeu. Tente conectar manualmente em alguns segundos.', 'error');
+                    }
+                }, 8000);
             }
         }
 

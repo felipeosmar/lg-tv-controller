@@ -6,7 +6,9 @@ Implementa descoberta, autenticação, controle e monitoramento via protocolo SS
 import asyncio
 import json
 import logging
+import socket
 import ssl
+import struct
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -403,3 +405,22 @@ class LGTVClient:
 
     async def screen_on(self) -> dict:
         return await self.request(SSAP["screen_on"])
+
+    @staticmethod
+    def wake_on_lan(mac: str, broadcast: str = "255.255.255.255", port: int = 9):
+        """Envia Magic Packet (WOL) para ligar a TV.
+        
+        Args:
+            mac: Endereço MAC da TV (ex: 'AC:5A:F0:C4:DD:F2')
+            broadcast: Endereço de broadcast da rede
+            port: Porta UDP (padrão 9)
+        """
+        mac_bytes = bytes.fromhex(mac.replace(":", "").replace("-", ""))
+        if len(mac_bytes) != 6:
+            raise ValueError(f"MAC inválido: {mac}")
+        # Magic Packet: 6x 0xFF + 16x MAC
+        packet = b"\xff" * 6 + mac_bytes * 16
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.sendto(packet, (broadcast, port))
+        logger.info(f"Magic Packet enviado para {mac} via {broadcast}:{port}")
