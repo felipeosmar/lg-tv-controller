@@ -5,3 +5,4 @@ __pycache__/
 *.log
 .env
 presets.json
+.env

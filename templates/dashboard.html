@@ -53,6 +53,19 @@
                 <button id="btnConnect" class="btn btn-sm btn-tv btn-success-tv" onclick="toggleConnection()">
                     <i class="bi bi-plug"></i> Conectar
                 </button>
+                <div id="userInfo" class="d-none">
+                    <div class="dropdown">
+                        <a href="#" class="d-flex align-items-center text-decoration-none dropdown-toggle" data-bs-toggle="dropdown">
+                            <img id="userAvatar" src="" alt="" width="28" height="28" class="rounded-circle me-1">
+                            <span id="userName" class="small text-light"></span>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark">
+                            <li><span id="userEmail" class="dropdown-item-text text-muted small"></span></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="/auth/logout"><i class="bi bi-box-arrow-right"></i> Sair</a></li>
+                        </ul>
+                    </div>
+                </div>
             </div>
         </div>
     </nav>
@@ -457,6 +470,16 @@
     </div>
 
     <script>
+        // Load user info
+        fetch('/api/user').then(r => r.json()).then(data => {
+            if (data.ok && data.user) {
+                document.getElementById('userName').textContent = data.user.name;
+                document.getElementById('userEmail').textContent = data.user.email;
+                if (data.user.picture) document.getElementById('userAvatar').src = data.user.picture;
+                document.getElementById('userInfo').classList.remove('d-none');
+            }
+        }).catch(() => {});
+
         let isMuted = false;
         let isConnected = false;
         let currentApp = '';

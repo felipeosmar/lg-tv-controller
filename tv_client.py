@@ -353,36 +353,77 @@ class LGTVClient:
             "params": {"target": url},
         })
 
-    async def launch_netflix(self, title_id: str, auto_play: bool = True) -> dict:
-        """Abre um título na Netflix e opcionalmente dá play automaticamente.
+    async def launch_netflix(
+        self, title_id: str, auto_play: bool = True, profile: str | None = None
+    ) -> dict:
+        """Abre um título na Netflix com seleção de perfil e auto-play.
+
+        Estratégia:
+        1. Abre Netflix normal, espera tela de perfis
+        2. Seleciona perfil (navega com RIGHT + ENTER)
+        3. Espera home carregar
+        4. Envia deep link pro título
+        5. ENTER pro play
 
         Args:
             title_id: ID do título (ex: '81321370' para Teletubbies 2022)
-            auto_play: Se True, envia ENTER após carregar para iniciar reprodução
+            auto_play: Se True, envia ENTER para iniciar reprodução
+            profile: Posição do perfil (0=primeiro, 1=segundo... ou nome como 'infantil')
+                     Perfis típicos: 0=FELIPE, 1=perfil2, 2=perfil3, 3=perfil4, 4=Infantil
         """
+        # Mapear nomes de perfil para posições (índice 0-based da esquerda)
+        profile_positions = {
+            "felipe": 0,
+            "infantil": 4,
+            "kids": 4,
+        }
+        profile_pos = profile_positions.get(str(profile).lower(), profile) if profile else None
+
+        # 1. Fechar Netflix se estiver aberta (para forçar tela de perfis)
+        try:
+            fg = await self.get_foreground_app()
+            if fg.get("appId") == "netflix":
+                await self.request(SSAP["close_app"], {"id": "netflix"})
+                await asyncio.sleep(2)
+        except Exception:
+            pass
+
+        # 2. Abrir Netflix
+        await self.request(SSAP["launch_app"], {"id": "netflix"})
+
+        # 3. Aguardar Netflix carregar (tela de perfis)
+        for _ in range(25):
+            await asyncio.sleep(1)
+            try:
+                fg = await self.get_foreground_app()
+                if fg.get("appId") == "netflix":
+                    await asyncio.sleep(6)  # Esperar tela de perfis renderizar
+                    break
+            except Exception:
+                pass
+
+        # 4. Selecionar perfil (se especificado)
+        if profile_pos is not None:
+            pos = int(profile_pos)
+            # Navegar até o perfil (RIGHT para mover entre perfis)
+            for _ in range(pos):
+                await self.send_button("RIGHT")
+                await asyncio.sleep(0.5)
+            await self.send_button("ENTER")
+            await asyncio.sleep(5)  # Esperar home do perfil carregar
+
+        # 5. Enviar deep link para o título
         result = await self.request(SSAP["launch_app"], {
             "id": "netflix",
             "params": {"contentTarget": f"https://www.netflix.com/title/{title_id}"},
         })
+
         if auto_play:
-            # Aguardar Netflix carregar o título e a página de detalhes renderizar.
-            # Detectamos quando a Netflix está em foreground e estável,
-            # depois enviamos ENTER para dar play no botão "Continuar".
-            for attempt in range(3):
-                await asyncio.sleep(5)
-                try:
-                    fg = await self.get_foreground_app()
-                    if fg.get("appId") == "netflix":
-                        # Netflix em foreground — esperar página renderizar
-                        await asyncio.sleep(3)
-                        await self.send_button("ENTER")
-                        # Verificar se entrou no player (aguardar e checar)
-                        await asyncio.sleep(3)
-                        fg2 = await self.get_foreground_app()
-                        if fg2.get("appId") == "netflix":
-                            break  # Ainda na Netflix = sucesso (player ou detalhes)
-                except Exception:
-                    pass
+            # 6. Esperar página de detalhes carregar e dar ENTER
+            await asyncio.sleep(6)
+            await self.send_button("ENTER")
+
+        return result
         return result
 
     async def close_app(self, app_id: str) -> dict:

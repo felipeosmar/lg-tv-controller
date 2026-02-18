@@ -19,6 +19,7 @@ import ssl as _ssl
 
 import aiohttp as _aiohttp
 
+from auth import auth_middleware, setup_auth
 from presets import load_presets, save_presets, get_preset, add_preset, remove_preset
 from tv_client import LGTVClient, APP_IDS, SSAP
 
@@ -251,10 +252,13 @@ async def api_apps(request):
     # Resolver alias
     app_id = APP_IDS.get(app_id, app_id)
     if action == "launch":
-        # Netflix deep link com auto-play
-        if app_id in ("netflix", "netflix") and body.get("title_id"):
+        # Netflix deep link com auto-play e seleção de perfil
+        if app_id == "netflix" and body.get("title_id"):
             auto_play = body.get("auto_play", True)
-            result = await tv.launch_netflix(body["title_id"], auto_play=auto_play)
+            profile = body.get("profile")
+            result = await tv.launch_netflix(
+                body["title_id"], auto_play=auto_play, profile=profile
+            )
             return web.json_response({"ok": True, "result": result, "auto_play": auto_play})
         params = body.get("params")
         result = await tv.launch_app(app_id, params=params)
@@ -501,7 +505,7 @@ async def dashboard(request):
 # ─── App setup ───────────────────────────────────────────────
 
 def create_app():
-    app = web.Application(middlewares=[error_middleware])
+    app = web.Application(middlewares=[auth_middleware, error_middleware])
 
     # Templates
     templates_dir = Path(__file__).parent / "templates"
@@ -510,6 +514,9 @@ def create_app():
     # Static files
     static_dir = Path(__file__).parent / "static"
     app.router.add_static("/static", str(static_dir), name="static")
+
+    # Auth
+    setup_auth(app)
 
     # Routes
     app.router.add_get("/", dashboard)
