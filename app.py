@@ -486,6 +486,8 @@ async def api_info(request):
 async def error_middleware(request, handler):
     try:
         return await handler(request)
+    except web.HTTPException:
+        raise  # Let aiohttp handle redirects, 401s, etc.
     except ConnectionError as e:
         return web.json_response({"ok": False, "message": f"TV desconectada: {e}"}, status=503)
     except TimeoutError as e:
@@ -505,7 +507,7 @@ async def dashboard(request):
 # ─── App setup ───────────────────────────────────────────────
 
 def create_app():
-    app = web.Application(middlewares=[auth_middleware, error_middleware])
+    app = web.Application(middlewares=[error_middleware])
 
     # Templates
     templates_dir = Path(__file__).parent / "templates"

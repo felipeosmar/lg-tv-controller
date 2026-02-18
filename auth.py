@@ -245,9 +245,13 @@ async def api_user(request):
 
 def setup_auth(app: web.Application):
     """Configura autenticação no app aiohttp."""
-    # Session storage (encrypted cookie)
+    # Session storage (encrypted cookie) — must be set up before auth middleware
     key = SESSION_SECRET.encode()[:32].ljust(32, b"\0")
     setup_session(app, EncryptedCookieStorage(key, cookie_name="tvctrl_session", max_age=86400 * 7))
+
+    # Auth middleware — added AFTER session middleware (setup_session appends its own)
+    if is_auth_configured():
+        app.middlewares.append(auth_middleware)
 
     # Routes
     app.router.add_get("/login", login_page)
